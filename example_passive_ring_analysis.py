@@ -30,24 +30,6 @@ class PassiveRing(RingAnalyzer):
             spamwriterDF = csv.writer(DF, delimiter=',')
             spamwriterDF.writerow(['path', 'filename', 'r1', 'r1_ci', 'r2a', 'r2a_ci', 'lambda', 'lambda_ci', 'FWHM', 'FWHM_ci', 'chisqr','redchi','aic','bic','port','idx'])
 
-def ring_worker(inputpath=None, inputfile=None, outputfile=None):
-    # instance of PassiveRing analyzer class
-    FWHM_guess=0.02 # guesstimated FWHM=20pm
-    instance=PassiveRing(hasDrop=True, hasAdd=False, FWHM_guess=FWHM_guess, outputfile=outputfile)
-    # read in the data
-    instance.readdata(inputpath, inputfile)
-    # FSR ~0.66nm from GC FP cavity; set smooth window to be 10x FSR
-    Nwin=int(np.floor(int(0.66*10/instance.lamstep/2)/2))*2
-    instance.deembed_envelop(Nwindow=Nwin)
-
-    width_guess=int(FWHM_guess/instance.lamstep)
-    width_range=[width_guess/4, width_guess*4] # wavelet width: FWHM/4 to FWHM*4
-    instance.cwt_peaks(width_range=width_range, snr=6.0)
-
-    # Electrical length of the ring=2*pi*neff*L in nanometer
-    EL=2*pi*2.85*10.0E3
-    instance.fit_all_resonances(Nwindow=width_guess*50, FWHM_guess=FWHM_guess, EL=EL)
-
 def ring_processor(inputfile, inputpath, outputfile):
     # instance of PassiveRing analyzer class
     FWHM_guess=0.02 # guesstimated FWHM=20pm
