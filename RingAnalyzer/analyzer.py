@@ -6,7 +6,7 @@ from scipy import signal as spsig
 import scipy
 import lmfit.models as lmod
 from sklearn.cluster import AgglomerativeClustering
-import fitfun
+from . import fitfun
 import csv
 
 __author__ = "Peng Sun"
