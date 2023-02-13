@@ -5,7 +5,7 @@ import numpy as np
 from scipy import signal as spsig
 import scipy
 import lmfit.models as lmod
-from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import AgglomerativeClustering, KMeans, SpectralClustering
 from . import fitfun
 import csv
 
@@ -79,10 +79,31 @@ class RingAnalyzer(MetaAnalyzer):
                     cwt_guess_duplist.append(ii)
                 else:
                     cwt_guess_duplist.append(ii+1)
-
         self.cwt_guess_nodup = np.delete(self.cwt_guess, cwt_guess_duplist)
-        X= np.transpose([1-self.ch1_norm_chop[self.cwt_guess_nodup]])
-        clustering = AgglomerativeClustering(n_clusters=2).fit(X)
+
+        peaks=self.cwt_guess_nodup
+        self.peakdifflist=np.zeros(len(peaks))
+        for ii in range(len(peaks)):
+            if ii==0: self.peakdifflist[ii] = abs(peaks[ii+1]-peaks[ii])
+            else: self.peakdifflist[ii]=abs(peaks[ii]-peaks[ii-1])
+
+        # np.savetxt('rawpeaks_withdiff.csv', np.transpose([self.lamchop[self.cwt_guess_nodup], self.peakdifflist, 1 - self.ch1_norm_chop[self.cwt_guess_nodup]]),
+        #            header='lam,dist,trans', comments='', delimiter=',')
+
+    def cluster_peaks(self,method='agglomerative'):
+        # standardize data
+        tr = 1-self.ch1_norm_chop[self.cwt_guess_nodup]
+        trstd = ((tr-np.mean(tr))/np.std(tr))
+        peakdiffstd = ((self.peakdifflist-np.mean(self.peakdifflist))/np.std(self.peakdifflist))
+        X= np.transpose([trstd,peakdiffstd])
+        if method=='agglomerative':
+            clustering = AgglomerativeClustering(n_clusters=2).fit(X)
+        elif method=='spectral':
+            clustering = SpectralClustering(n_clusters=2).fit(X)
+        elif method=='kmeans':
+            clustering = KMeans(n_clusters=2).fit(X)
+        else:
+            clustering = AgglomerativeClustering(n_clusters=2).fit(X)
 
         if np.mean(1-self.ch1_norm_chop[self.cwt_guess_nodup[np.argwhere(clustering.labels_==1)]]) > \
             np.mean(1-self.ch1_norm_chop[self.cwt_guess_nodup[np.argwhere(clustering.labels_==0)]]):
