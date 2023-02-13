@@ -43,6 +43,7 @@ def ring_processor(inputfile, inputpath, outputfile):
     width_guess=int(FWHM_guess/instance.lamstep)
     width_range=[width_guess/4, width_guess*4] # wavelet width: FWHM/4 to FWHM*4
     instance.cwt_peaks(width_range=width_range, snr=6.0)
+    instance.cluster_peaks()
 
     # Electrical length of the ring=2*pi*neff*L in nanometer
     EL=2*pi*2.85*10.0E3
