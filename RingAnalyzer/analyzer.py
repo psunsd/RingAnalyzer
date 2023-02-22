@@ -124,8 +124,9 @@ class RingAnalyzer(MetaAnalyzer):
 
             resonance_all.append(self.fit_resonance(self.lamchop[lb:ub], self.ch1_norm_chop[lb:ub],
                                                     port='thru', residx=ii, EL=EL))
-            resonance_all.append(self.fit_resonance(self.lamchop[lb:ub], 1-self.ch2_norm_chop[lb:ub],
-                                                    port='drop', residx=ii, EL=EL))
+            if self._hasDrop==True:
+                resonance_all.append(self.fit_resonance(self.lamchop[lb:ub], 1-self.ch2_norm_chop[lb:ub],
+                                                        port='drop', residx=ii, EL=EL))
 
         return resonance_all
 
