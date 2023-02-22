@@ -46,7 +46,7 @@ class RingAnalyzer(MetaAnalyzer):
 
     def deembed_envelop(self, Nwindow=10):
         self.ch1_filtered=np.convolve(self.ch1, np.ndarray.flatten(np.ones((1,Nwindow))/float(Nwindow)))[int(Nwindow/2):int(Nwindow/2)+len(self.lam)]
-        self.ch1_filtered_dB=np.log10(np.abs(self.ch1_filtered))
+        self.ch1_filtered_dB=10.0*np.log10(np.abs(self.ch1_filtered))
         pwridx=self.ch1_filtered_dB>=max(self.ch1_filtered_dB)-7.0
         pwrwindow=self.ch1_filtered_dB[pwridx]
         lamwindow=self.lam[pwridx]
@@ -162,6 +162,9 @@ class RingAnalyzer(MetaAnalyzer):
         fitdata = []
         fitdata.append(self.inputpath)
         fitdata.append(self.inputfile)
+        fitdata.append(self.gcploss)
+        fitdata.append(self.gcplam)
+        fitdata.append(self.gcbw1db)
         for key in fitout.params.keys():
             fitout.params[key].stderr = np.sqrt(
                 fitout.varcov[ci_dict[key], ci_dict[key]] * 2.0 * fitout.redchi) * 2.0 * Z
