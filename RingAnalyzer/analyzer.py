@@ -94,7 +94,10 @@ class RingAnalyzer(MetaAnalyzer):
         # standardize data
         tr = 1-self.ch1_norm_chop[self.cwt_guess_nodup]
         trstd = ((tr-np.mean(tr))/np.std(tr))
-        peakdiffstd = ((self.peakdifflist-np.mean(self.peakdifflist))/np.std(self.peakdifflist))
+        if np.std(self.peakdifflist)!=0:
+            peakdiffstd = (self.peakdifflist-np.mean(self.peakdifflist))/np.std(self.peakdifflist)
+        else:
+            peakdiffstd = np.ones_like(self.peakdifflist)
         X= np.transpose([trstd,peakdiffstd])
         if method=='agglomerative':
             clustering = AgglomerativeClustering(n_clusters=2).fit(X)
