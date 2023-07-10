@@ -44,6 +44,20 @@ class RingAnalyzer(MetaAnalyzer):
     def readdata(self, inputfile=None):
         pass
 
+    def analyze_gc(self, Nwindow=10):
+        self.ch1_raw_dB=10.0*np.log10(np.abs(self.ch1))
+        pwridx=self.ch1_raw_dB>=max(self.ch1_raw_dB)-7.0
+        pwrwindow=self.ch1_raw_dB[pwridx]
+        lamwindow=self.lam[pwridx]
+        pgc=np.polyfit(lamwindow,pwrwindow,2,full=True)
+
+        # import matplotlib.pyplot as pl; pl.plot(lamwindow, pwrwindow, 'b'); pl.plot(lamwindow, np.polyval(pgc[0], lamwindow), 'r'); pl.show()
+        self.gcplam=-pgc[0][1]/2.0/pgc[0][0]
+        self.gcploss=-(pgc[0][2]-pgc[0][1]**2/4.0/pgc[0][0])/2.0
+        self.gcbw1db=2.0*np.sqrt(np.abs(2.0/pgc[0][0]))
+        self.gcfrnmean=pgc[1][0]/(lamwindow.max()-lamwindow.min())*np.diff(lamwindow).mean()
+        self.gcfrnmax=max(abs(pwrwindow-np.polyval(pgc[0],lamwindow)))
+
     def deembed_envelop(self, Nwindow=10):
         self.ch1_filtered=np.convolve(self.ch1, np.ndarray.flatten(np.ones((1,Nwindow))/float(Nwindow)))[int(Nwindow/2):int(Nwindow/2)+len(self.lam)]
         self.ch1_filtered_dB=10.0*np.log10(np.abs(self.ch1_filtered))
@@ -87,33 +101,38 @@ class RingAnalyzer(MetaAnalyzer):
             if ii==0: self.peakdifflist[ii] = abs(peaks[ii+1]-peaks[ii])
             else: self.peakdifflist[ii]=abs(peaks[ii]-peaks[ii-1])
 
+        self.cwt_guess_nodup_clean = self.cwt_guess_nodup
+
         # np.savetxt('rawpeaks_withdiff.csv', np.transpose([self.lamchop[self.cwt_guess_nodup], self.peakdifflist, 1 - self.ch1_norm_chop[self.cwt_guess_nodup]]),
         #            header='lam,dist,trans', comments='', delimiter=',')
 
     def cluster_peaks(self,method='agglomerative'):
-        # standardize data
-        tr = 1-self.ch1_norm_chop[self.cwt_guess_nodup]
-        trstd = ((tr-np.mean(tr))/np.std(tr))
-        if np.std(self.peakdifflist)!=0:
-            peakdiffstd = (self.peakdifflist-np.mean(self.peakdifflist))/np.std(self.peakdifflist)
+        if not len(self.cwt_guess_nodup):
+            print("CWT detected no peaks.")
         else:
-            peakdiffstd = np.ones_like(self.peakdifflist)
-        X= np.transpose([trstd,peakdiffstd])
-        if method=='agglomerative':
-            clustering = AgglomerativeClustering(n_clusters=2).fit(X)
-        elif method=='spectral':
-            clustering = SpectralClustering(n_clusters=2).fit(X)
-        elif method=='kmeans':
-            clustering = KMeans(n_clusters=2).fit(X)
-        else:
-            clustering = AgglomerativeClustering(n_clusters=2).fit(X)
+            # standardize data
+            tr = 1-self.ch1_norm_chop[self.cwt_guess_nodup]
+            trstd = ((tr-np.mean(tr))/np.std(tr))
+            if np.std(self.peakdifflist)!=0:
+                peakdiffstd = (self.peakdifflist-np.mean(self.peakdifflist))/np.std(self.peakdifflist)
+            else:
+                peakdiffstd = np.ones_like(self.peakdifflist)
+            X= np.transpose([trstd,peakdiffstd])
+            if method=='agglomerative':
+                clustering = AgglomerativeClustering(n_clusters=2).fit(X)
+            elif method=='spectral':
+                clustering = SpectralClustering(n_clusters=2).fit(X)
+            elif method=='kmeans':
+                clustering = KMeans(n_clusters=2).fit(X)
+            else:
+                clustering = AgglomerativeClustering(n_clusters=2).fit(X)
 
-        if np.mean(1-self.ch1_norm_chop[self.cwt_guess_nodup[np.argwhere(clustering.labels_==1)]]) > \
-            np.mean(1-self.ch1_norm_chop[self.cwt_guess_nodup[np.argwhere(clustering.labels_==0)]]):
-            signalidx,noiseidx = 1,0
-        else: signalidx,noiseidx = 0,1
+            if np.mean(1-self.ch1_norm_chop[self.cwt_guess_nodup[np.argwhere(clustering.labels_==1)]]) > \
+                np.mean(1-self.ch1_norm_chop[self.cwt_guess_nodup[np.argwhere(clustering.labels_==0)]]):
+                signalidx,noiseidx = 1,0
+            else: signalidx,noiseidx = 0,1
 
-        self.cwt_guess_nodup_clean = self.cwt_guess_nodup[np.argwhere(clustering.labels_==signalidx)].flatten()
+            self.cwt_guess_nodup_clean = self.cwt_guess_nodup[np.argwhere(clustering.labels_==signalidx)].flatten()
 
     def fit_all_resonances(self, Nwindow=50, FWHM_guess=0.1, EL=1125.0E3):
         resonance_all = []
