@@ -19,23 +19,6 @@ class MetaAnalyzer(with_metaclass(ABCMeta, object)):
     def __init__(self, device=None):
         self._device = device
 
-    #
-    # @abstractmethod
-    # def cwt_peaks(self):
-    #     pass
-    #
-    # @abstractmethod
-    # def clustering_peaks(self):
-    #     pass
-    #
-    # @abstractmethod
-    # def partition_windows(self):
-    #     pass
-    #
-    # @abstractmethod
-    # def fit_resonances(self):
-    #     pass
-
 class RingAnalyzer(MetaAnalyzer):
     def __init__(self, FWHM_guess=0.1):
         super(RingAnalyzer, self).__init__(device='ring')
@@ -44,9 +27,30 @@ class RingAnalyzer(MetaAnalyzer):
     def readdata(self, inputfile=None):
         pass
 
-    def analyze_gc(self, Nwindow=10):
+    def analyze_gc(self, spectral_top=7.0):
+        """ Analyze grating couplers
+        The top portion of the transmission spectra in dB will be fitted to parabolic, from which the GC peak loss,
+        peak wavelength, and the 1 dB bandwidth will be extracted.  Mean and max fit residual norms will be extracted,
+        which represent the average and maximum ripples in the spectrum.
+
+        Parameters
+        spectral_top : float (optional)
+            The top portion of the transmission spectra in dB that will be fitted to parabolic; default is 7.0
+
+        Attributes
+        gcplam : float
+            Fitted peak wavelength in nm
+        gcploss : float
+            Fitted peak loss in dB
+        gcbw1db : float
+            Fitted 1 dB bandwidth in nm
+        gcfrnmean : float
+            Fitted residual norm, mean value in dB within the top portion of the spectrum
+        gcfrnmax : float
+            Fitted residual norm, max value in dB within the top portion of the spectrum
+        """
         self.ch1_raw_dB=10.0*np.log10(np.abs(self.ch1))
-        pwridx=self.ch1_raw_dB>=max(self.ch1_raw_dB)-7.0
+        pwridx=self.ch1_raw_dB>=max(self.ch1_raw_dB)-spectral_top
         pwrwindow=self.ch1_raw_dB[pwridx]
         lamwindow=self.lam[pwridx]
         pgc=np.polyfit(lamwindow,pwrwindow,2,full=True)
@@ -59,6 +63,32 @@ class RingAnalyzer(MetaAnalyzer):
         self.gcfrnmax=max(abs(pwrwindow-np.polyval(pgc[0],lamwindow)))
 
     def deembed_envelop(self, Nwindow=10):
+        """ Deembed the envelop of grating couplers
+        Transmission spectra of the through port will be smoothed by a moving-average window 
+        of length Nwindow.  The smoothed transmission spectra will be used to deembed the through port and 
+        drop port (if available) transmission spectra.
+
+        Parameters
+        Nwindow : int
+            Moving average window length in the number of data point; in general it should be ~10x larger
+            than the high frequency ripples in the raw spectra
+
+        Attributes
+        ch1_filtered : float
+            Smoothed through port transmission in linear scale
+        ch1_filtered_dB : float
+            Smoothed through port transmission in dB
+        ch1_norm : float
+            Normalized through port transmission
+        ch2_norm : float
+            Normalized drop port transmission, if available
+        lamchop : float
+            Wavelength array after excluding the left and right paddings
+        ch1_norm_chop : float
+            Normalized through port transmission after excluding the left and right paddings
+        ch2_norm_chop : float
+            Normalized drop port transmission after excluding the left and right paddings
+        """
         self.ch1_filtered=np.convolve(self.ch1, np.ndarray.flatten(np.ones((1,Nwindow))/float(Nwindow)))[int(Nwindow/2):int(Nwindow/2)+len(self.lam)]
         self.ch1_filtered_dB=10.0*np.log10(np.abs(self.ch1_filtered))
         pwridx=self.ch1_filtered_dB>=max(self.ch1_filtered_dB)-7.0
@@ -81,6 +111,26 @@ class RingAnalyzer(MetaAnalyzer):
             self.ch2_norm_chop=self.ch2_norm[Nchop:len(self.lam)-Nchop]
 
     def cwt_peaks(self, width_range=[1,10], snr=5.0):
+        """ Detect peaks in normalized spectra using Continuous Wavelet Transform
+        Normalized transmission spectra will go through CWT and then resonances are detected as ridge lines
+        in the 2D time-frequency representation.
+
+        Parameters
+        width_range : length-2 list of float
+            Lower and upper range of the wavelet width in the number of wavelength points used in the CWT.
+            A rule-of-thumb is that wavelet width should range from FWHM/4 to FWHM*4 of the resonance
+        snr : float
+            Signal-to-noise ratio of the ridge line detection in CWT.  Note that the SNR depends on the noise
+            in the spectra and ER of the resonances, so there is no universal value for all designs and tests
+
+        Attributes
+        cwt_guess : list of float
+            CWT guessed indices of resonance peaks in the chopped transmission spectra
+        cwt_guess_nodup : list of float
+            CWT guessed resonance indices with duplicates removed: if spacing between two peaks is < 2*FWHM, then
+            the peak with lower transmission will be discarded
+        """
+
         width_guess = int(self.FWHM_guess/self.lamstep)
         wavelet_widths = np.logspace(*np.log10(width_range), num=100)
         self.cwt_guess=spsig.find_peaks_cwt(1-self.ch1_norm_chop, wavelet_widths, min_snr=snr)
@@ -107,6 +157,19 @@ class RingAnalyzer(MetaAnalyzer):
         #            header='lam,dist,trans', comments='', delimiter=',')
 
     def cluster_peaks(self,method='agglomerative'):
+        """ Distinguish true resonances from spurious resonances due to noise/distortion
+        Use Clustering to distinguish true resonances from spurious resonances.  The clustering
+        is on two dimensional space of normalized wavelength spacing and normalized transmission.
+
+        Parameters
+        method : str
+            Method for clustering the points in the 2D space of normalized wavelength spacing and normalized 
+            transmission.  Options are: 'agglomerative', 'spectral', 'kmeans'.  Default is 'agglomerative'.
+
+        Attributes
+        cwt_guess_nodup_clean : list of float
+            True resonance indices with spurious resonances removed.
+        """
         if not len(self.cwt_guess_nodup):
             print("CWT detected no peaks.")
         else:
@@ -134,7 +197,22 @@ class RingAnalyzer(MetaAnalyzer):
 
             self.cwt_guess_nodup_clean = self.cwt_guess_nodup[np.argwhere(clustering.labels_==signalidx)].flatten()
 
-    def fit_all_resonances(self, Nwindow=50, FWHM_guess=0.1, EL=1125.0E3):
+    def fit_all_resonances(self, Nwindow=50, EL=1125.0E3):
+        """ Fit all resonances in the current spectrum
+        Use Clustering to distinguish true resonances from spurious resonances.  The clustering
+        is on two dimensional space of normalized wavelength spacing and normalized transmission.
+
+        Parameters
+        Nwindow : int
+            Window width of the partitioned transmission spectra for fitting.  A rule-of-thumb is that each window should 
+            be at least 10x guessed FWHM of the resonances.
+        EL : float
+            Electrical length of the ring, which is 2*pi*ring_radius(in nm)*neff
+            
+        Attributes
+        resonances_all : list of dictionaries
+            True resonance indices with spurious resonances removed.
+        """
         resonance_all = []
         for ii in range(len(self.cwt_guess_nodup_clean)):
             if self.cwt_guess_nodup_clean[ii]-int(Nwindow/2)<0: lb=0
@@ -153,6 +231,26 @@ class RingAnalyzer(MetaAnalyzer):
         return resonance_all
 
     def fit_resonance(self, x, y, port='thru', residx=0, EL=1125.0E3):
+        """ Fit an individual resonance 
+        Use Clustering to distinguish true resonances from spurious resonances.  The clustering
+        is on two dimensional space of normalized wavelength spacing and normalized transmission.
+
+        Parameters
+        x : array of float
+            Wavelength of the partitioned window within which there is only one resonance
+        y : array of float
+            Transmission spectrum of the partitioned window within which there is only one resonance
+        port : str
+            Port of the spectrum.  Options are 'thru' and 'drop'.
+        residx : int
+            Index of the resonance in the spectrum
+        EL : float
+            Electrical length of the ring
+            
+        Attributes
+        fitdata : list
+            List of fitting results.
+        """
         center_guess = x[np.argmin(y)]
         delta_lam_guess = self.FWHM_guess / np.sqrt(2.0)
         center_guess_band = delta_lam_guess * np.array([-1, 1]) + center_guess
@@ -198,5 +296,20 @@ class RingAnalyzer(MetaAnalyzer):
         fitdata.append(fitout.bic)
         fitdata.append(port)
         fitdata.append(residx)
+
+        Tmin = min(y)
+        ERraw = 10*np.log10(Tmin)
+        HalfT = (1.0+Tmin)/2.0
+        yleft = y[0:np.argmin(y)]
+        yright = y[np.argmin(y):-1]
+        xleft = x[0:np.argmin(y)]
+        xright = x[np.argmin(y):-1]
+        if (len(xleft)==0 or len(xright)==0):
+            FWHMraw = 0.0
+        else:
+            FWHMraw = xright[np.argmin(np.abs(yright-HalfT))] - xleft[np.argmin(np.abs(yleft-HalfT))]
+
+        fitdata.append(ERraw)
+        fitdata.append(FWHMraw)
 
         return fitdata
