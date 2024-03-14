@@ -19,9 +19,23 @@ def fitfun_thru(x, r1, r2a, lam, EL):
         raise ValueError('NaN in fitting function')
     return retval
 
+def fitfun_thru_FWHM(x, *data):
+    r1, r2a, lam, EL = data
+    retval = 10*np.log10((r1**2+r2a**2-2*r1*r2a*cos(EL*(1/x-1/lam)))/(1+r1**2*r2a**2-2*r1*r2a*cos(EL*(1/x-1/lam))))+3
+    if np.any(np.isnan(retval)):
+        raise ValueError('NaN in fitting function')
+    return retval
+
 def fitfun_drop(x, A, r1r2a, lam, EL):
     # Ring drop port based on physical parameters
     retval = 1-A/(1+r1r2a**2-2*r1r2a*cos(EL*(1/x-1/lam)))
+    if np.any(np.isnan(retval)):
+        raise ValueError('NaN in fitting function')
+    return retval
+
+def fitfun_drop_FWHM(x, *data):
+    A, r1r2a, lam, EL = data
+    retval = 10*np.log10(1-A/(1+r1r2a**2-2*r1r2a*cos(EL*(1/x-1/lam))))+3
     if np.any(np.isnan(retval)):
         raise ValueError('NaN in fitting function')
     return retval
