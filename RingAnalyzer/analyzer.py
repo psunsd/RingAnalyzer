@@ -8,6 +8,7 @@ import lmfit.models as lmod
 from sklearn.cluster import AgglomerativeClustering, KMeans, SpectralClustering
 from . import fitfun
 import csv
+from scipy.optimize import fsolve
 
 __author__ = "Peng Sun"
 __license__ ="MIT License"
@@ -27,7 +28,7 @@ class RingAnalyzer(MetaAnalyzer):
     def readdata(self, inputfile=None):
         pass
 
-    def analyze_gc(self, spectral_top=7.0):
+    def analyze_gc(self, spectral_top=7.0, Nwindow=10):
         """ Analyze grating couplers
         The top portion of the transmission spectra in dB will be fitted to parabolic, from which the GC peak loss,
         peak wavelength, and the 1 dB bandwidth will be extracted.  Mean and max fit residual norms will be extracted,
@@ -61,6 +62,25 @@ class RingAnalyzer(MetaAnalyzer):
         self.gcbw1db=2.0*np.sqrt(np.abs(2.0/pgc[0][0]))
         self.gcfrnmean=pgc[1][0]/(lamwindow.max()-lamwindow.min())*np.diff(lamwindow).mean()
         self.gcfrnmax=max(abs(pwrwindow-np.polyval(pgc[0],lamwindow)))
+
+        # Nwindow = int(2.0/self.lamstep)
+        self.ch1_filtered_dB = np.convolve(self.ch1_raw_dB, np.ndarray.flatten(np.ones((1,Nwindow))/float(Nwindow)), mode='same')
+        self.ch1_filtered_dB_chop = self.ch1_filtered_dB[int(Nwindow/2):len(self.lam)-int(Nwindow/2)]
+
+        self.lam_chop = self.lam[int(Nwindow/2):len(self.lam)-int(Nwindow/2)]
+        self.gcploss_sm = -self.ch1_filtered_dB_chop.max()/2.0
+        self.gcplam_sm = self.lam_chop[np.argmax(self.ch1_filtered_dB_chop)]
+        self.gcbw1db_sm = self.lam_chop[np.argwhere(self.ch1_filtered_dB_chop>=self.ch1_filtered_dB_chop.max()-2.0).max()] -\
+                    self.lam_chop[np.argwhere(self.ch1_filtered_dB_chop >= self.ch1_filtered_dB_chop.max() - 2.0).min()]
+        self.gcbw1db_lb_sm = self.lam_chop[np.argwhere(self.ch1_filtered_dB_chop >= self.ch1_filtered_dB_chop.max() - 2.0).min()]
+        self.gcbw1db_ub_sm = self.lam_chop[np.argwhere(self.ch1_filtered_dB_chop >= self.ch1_filtered_dB_chop.max() - 2.0).max()]
+        self.sm_ripple = self.ch1_raw_dB[int(Nwindow/2):len(self.lam)-int(Nwindow/2)] - self.ch1_filtered_dB[int(Nwindow/2):len(self.lam)-int(Nwindow/2)]
+        self.sm_ripple_window = self.sm_ripple[np.argmax(self.ch1_filtered_dB_chop)-int(0.3/self.lamstep):np.argmax(self.ch1_filtered_dB_chop)+int(0.3/self.lamstep)]
+        self.gcfrnmax_sm = max(np.abs(self.sm_ripple_window))
+
+        self.worstlossin10nm = self.ch1_filtered_dB_chop[np.argmax(self.ch1_filtered_dB_chop)-int(10.0/self.lamstep):np.argmax(self.ch1_filtered_dB_chop)+int(10.0/self.lamstep)].min()/(-2.0)
+
+        # import matplotlib.pyplot as pl; pl.plot(self.lam,self.ch1_raw_dB,'b-');pl.plot(self.lam_chop,self.ch1_filtered_dB_chop,'rx');pl.show()
 
     def deembed_envelop(self, Nwindow=10):
         """ Deembed the envelop of grating couplers
@@ -134,6 +154,8 @@ class RingAnalyzer(MetaAnalyzer):
         width_guess = int(self.FWHM_guess/self.lamstep)
         wavelet_widths = np.logspace(*np.log10(width_range), num=100)
         self.cwt_guess=spsig.find_peaks_cwt(1-self.ch1_norm_chop, wavelet_widths, min_snr=snr)
+        # import matplotlib.pyplot as pl
+        # pl.plot(self.lamchop,self.ch1_norm_chop,'b');pl.plot(self.lamchop[self.cwt_guess],self.ch1_norm_chop[self.cwt_guess],'ro');pl.show()
         cwt_guess_duplist = []
         # remove duplicate in detected peaks: if spacing between two peaks <2*FWHM,
         # then the lower peak will be discarded
@@ -144,6 +166,8 @@ class RingAnalyzer(MetaAnalyzer):
                 else:
                     cwt_guess_duplist.append(ii+1)
         self.cwt_guess_nodup = np.delete(self.cwt_guess, cwt_guess_duplist)
+        # import matplotlib.pyplot as pl
+        # pl.plot(self.lamchop,self.ch1_norm_chop,'b');pl.plot(self.lamchop[self.cwt_guess_nodup],self.ch1_norm_chop[self.cwt_guess_nodup],'ro');pl.show()
 
         peaks=self.cwt_guess_nodup
         self.peakdifflist=np.zeros(len(peaks))
@@ -152,7 +176,9 @@ class RingAnalyzer(MetaAnalyzer):
             else: self.peakdifflist[ii]=abs(peaks[ii]-peaks[ii-1])
 
         self.cwt_guess_nodup_clean = self.cwt_guess_nodup
-
+        # import matplotlib.pyplot as pl
+        # pl.plot(self.lamchop-1310,self.ch1_norm_chop,'b');pl.plot(self.lamchop[self.cwt_guess_nodup_clean]-1310,self.ch1_norm_chop[self.cwt_guess_nodup_clean],'ro');pl.show()
+        # p=1
         # np.savetxt('rawpeaks_withdiff.csv', np.transpose([self.lamchop[self.cwt_guess_nodup], self.peakdifflist, 1 - self.ch1_norm_chop[self.cwt_guess_nodup]]),
         #            header='lam,dist,trans', comments='', delimiter=',')
 
@@ -225,7 +251,11 @@ class RingAnalyzer(MetaAnalyzer):
             resonance_all.append(self.fit_resonance(self.lamchop[lb:ub], self.ch1_norm_chop[lb:ub],
                                                     port='thru', residx=ii, EL=EL))
             if self._hasDrop==True:
-                resonance_all.append(self.fit_resonance(self.lamchop[lb:ub], 1-self.ch2_norm_chop[lb:ub],
+                if min(1-self.ch2_norm_chop[lb:ub])<-0.1: # deembedding inappropriate
+                    ydrop_norm = 1.0-1.0/(1.0-min(1-self.ch2_norm_chop[lb:ub]))*self.ch2_norm_chop[lb:ub] + 1e-5
+                else:
+                    ydrop_norm = 1-self.ch2_norm_chop[lb:ub]
+                resonance_all.append(self.fit_resonance(self.lamchop[lb:ub], ydrop_norm,
                                                         port='drop', residx=ii, EL=EL))
 
         return resonance_all
@@ -297,6 +327,13 @@ class RingAnalyzer(MetaAnalyzer):
         fitdata.append(port)
         fitdata.append(residx)
 
+        if port =='thru':
+            data = (fitout.params['r1'].value, fitout.params['r2a'].value, fitout.params['lam'].value, fitout.params['EL'].value)
+            lamFWHM = fsolve(fitfun.fitfun_thru_FWHM, [fitout.params['lam'].value-self.FWHM_guess/2.0, fitout.params['lam'].value+self.FWHM_guess/2.0], args=data)
+        else:
+            data = (fitout.params['A'].value, fitout.params['r1r2a'].value, fitout.params['lam'].value, fitout.params['EL'].value)
+            lamFWHM = fsolve(fitfun.fitfun_drop_FWHM, [fitout.params['lam'].value-self.FWHM_guess/2.0, fitout.params['lam'].value+self.FWHM_guess/2.0], args=data)
+
         Tmin = min(y)
         ERraw = 10*np.log10(Tmin)
         HalfT = (1.0+Tmin)/2.0
@@ -311,5 +348,6 @@ class RingAnalyzer(MetaAnalyzer):
 
         fitdata.append(ERraw)
         fitdata.append(FWHMraw)
+        fitdata.append(lamFWHM[1]-lamFWHM[0])
 
         return fitdata
